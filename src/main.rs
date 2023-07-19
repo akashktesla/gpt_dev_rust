@@ -1,4 +1,5 @@
 #![allow(warnings)]
+use std::collections::HashSet;
 use gpt_dev_rust::rustpp::*;
 use tch::nn::{Module, OptimizerConfig};
 use tch::{kind, nn, Device, Tensor};
@@ -15,7 +16,13 @@ fn main(){
     let n_layer = 4;
     let dropout = 0.0;
 
-    let f = read_file(&String::from("geng.txt"));
+    let text = read_file(&String::from("geng.txt"));
+    let chars = text.chars().collect::<HashSet<char>>().into_iter().collect::<Vec<char>>();
+    let vocab_size = chars.len();
+    
+    //encoding
+    
+        
     
 
 
