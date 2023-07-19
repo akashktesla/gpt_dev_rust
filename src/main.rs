@@ -1,5 +1,5 @@
 #![allow(warnings)]
-use std::collections::HashSet;
+use std::collections::{HashSet,HashMap};
 use gpt_dev_rust::rustpp::*;
 use tch::nn::{Module, OptimizerConfig};
 use tch::{kind, nn, Device, Tensor};
@@ -20,11 +20,56 @@ fn main(){
     let chars = text.chars().collect::<HashSet<char>>().into_iter().collect::<Vec<char>>();
     let vocab_size = chars.len();
     
-    //encoding
+    //for encoding
+    // c(char) to i(index)
+    let ctoi:HashMap<char,i32> = chars
+        .iter()
+        .enumerate()
+        .map(|(i, &ch)|{ (ch, i as i32)})
+        .collect();
+    // for decoding
+    // i(index) to c(char)
+    let itoc:HashMap<i32,char> = chars
+        .iter()
+        .enumerate()
+        .map(|(i,&ch)|{(i as i32,ch)})
+        .collect();
     
+    let encoded_data = encode(&text,&ctoi);
+    let data = Tensor::from_slice(&encoded_data).to_kind(tch::Kind::Int64);
+    let data_len = data.size()[0];
+    let n = (0.9*data_len as f32) as i64; // first 90% will be train, rest val
+    let mut split_data = data.split(n, 0);
+    let test_data = split_data.pop().unwrap(); 
+    let train_data = split_data.pop().unwrap(); 
+    println!("train data: {:?}",train_data);
+    train_data.print();
+    println!("test data: {:?}",test_data);
+
+
         
     
-
-
-
 }
+
+fn encode(str:&String,ctoi:&HashMap<char,i32>)->Vec<i32>{ 
+    let mut returns = Vec::new();
+    for i in str.chars(){
+        returns.push(ctoi.get(&i).unwrap().clone());
+    }
+    return returns;
+}
+
+fn decode(vec:Vec<i32>,itoc:HashMap<i32,char>)->String{
+    let mut returns = String::new();
+    for i in vec{
+        returns.push(itoc.get(&i).unwrap().clone());
+    }
+    return returns;
+}
+
+
+
+
+
+
+
