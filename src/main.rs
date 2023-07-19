@@ -40,16 +40,20 @@ fn main(){
     let data_len = data.size()[0];
     let n = (0.9*data_len as f32) as i64; // first 90% will be train, rest val
     let mut split_data = data.split(n, 0);
-    let test_data = split_data.pop().unwrap(); 
+    let val_data = split_data.pop().unwrap(); 
     let train_data = split_data.pop().unwrap(); 
     println!("train data: {:?}",train_data);
     train_data.print();
-    println!("test data: {:?}",test_data);
-
-
+    println!("test data: {:?}",val_data);
         
-    
 }
+
+
+fn get_batch(data:&Tensor){
+    let len = data.size()[0];
+
+}
+
 
 fn encode(str:&String,ctoi:&HashMap<char,i32>)->Vec<i32>{ 
     let mut returns = Vec::new();
