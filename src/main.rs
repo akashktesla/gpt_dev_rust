@@ -1,26 +1,28 @@
 #![allow(warnings)]
+use tch::{Kind, nn, Device, Tensor};
+use tch::nn::{Module, OptimizerConfig,ModuleT,Linear};
 use rand::Rng;
 use std::collections::{HashSet,HashMap};
+use std::default;
 use gpt_dev_rust::rustpp::*;
-use tch::nn::{Module, OptimizerConfig,ModuleT};
-use tch::{Kind, nn, Device, Tensor};
+
+static BATCH_SIZE:i64 = 16; // how many independent sequences will we process in parallel?
+static BLOCK_SIZE:i64 = 32; // what is the maximum context length for predictions?
+static MAX_ITERS:i64 = 5000;
+static eval_interval:i64 = 100;
+static LEARNING_RATE:f64 = 1e-3;
+static EVAL_ITERS:i64 = 200;
+static N_EMBD:i64 = 64;
+static N_HEAD:i64 = 4;
+static N_LAYER:i64 = 4;
+static DROPOUT:f64 = 0.0;
 
 fn main(){
-    let batch_size = 16; // how many independent sequences will we process in parallel?
-    let block_size = 32; // what is the maximum context length for predictions?
-    let max_iters = 5000;
-    let eval_interval = 100;
-    let learning_rate = 1e-3;
-    let eval_iters = 200;
-    let n_embd = 64;
-    let n_head = 4;
-    let n_layer = 4;
-    let dropout = 0.0;
 
     let text = read_file(&String::from("geng.txt"));
     let chars = text.chars().collect::<HashSet<char>>().into_iter().collect::<Vec<char>>();
     let vocab_size = chars.len();
-    
+
     //for encoding
     // c(char) to i(index)
     let ctoi:HashMap<char,i32> = chars
@@ -35,7 +37,7 @@ fn main(){
         .enumerate()
         .map(|(i,&ch)|{(i as i32,ch)})
         .collect();
-    
+
     let encoded_data = encode(&text,&ctoi);
     let data = Tensor::from_slice(&encoded_data).to_kind(tch::Kind::Int64);
     let data_len = data.size()[0];
@@ -46,7 +48,7 @@ fn main(){
     println!("train data: {:?}",train_data);
     train_data.print();
     println!("test data: {:?}",val_data);
-        
+
 }
 
 
@@ -95,19 +97,19 @@ struct Head {
 }
 
 impl Head {
-    fn new(vs: &nn::Path, n_embd: i64, head_size: i64, block_size: i64, dropout: f64) -> Head {
+    fn new(vs: &nn::Path, head_size: i64) -> Head {
         Head {
-            key: nn::linear(vs, n_embd, head_size, Default::default()),
-            query: nn::linear(vs, n_embd, head_size, Default::default()),
-            value: nn::linear(vs, n_embd, head_size, Default::default()),
-            tril: Tensor::from(tch::Tensor::tril(&Tensor::ones(&[block_size, block_size], (Kind::Float, tch::Device::Cpu)),0)),
-            dropout,
+            key: nn::linear(vs, N_EMBD, head_size, Default::default()),
+            query: nn::linear(vs, N_EMBD, head_size, Default::default()),
+            value: nn::linear(vs, N_EMBD, head_size, Default::default()),
+            tril: Tensor::from(tch::Tensor::tril(&Tensor::ones(&[BLOCK_SIZE, BLOCK_SIZE], (Kind::Float, tch::Device::Cpu)),0)),
+            dropout: DROPOUT,
         }
     }
 }
 
 impl Module for Head{
-        fn forward(&self, x: &Tensor) -> Tensor {
+    fn forward(&self, x: &Tensor) -> Tensor {
         let (b, t, c) = x.size3().unwrap();
         let k = self.key.forward(x);   // (B, T, C)
         let q = self.query.forward(x); // (B, T, C)
@@ -135,5 +137,129 @@ impl Module for Head{
         let out = wei.matmul(&v); // (B, T, T) @ (B, T, C) -> (B, T, C)
 
         out
+    }
+}
+
+//         self.proj = nn.Linear(n_embd, n_embd)
+//         self.dropout = nn.Dropout(dropout)
+//
+//     def forward(self, x):
+//         out = torch.cat([h(x) for h in self.heads], dim=-1)
+//         out = self.dropout(self.proj(out))
+//         return out
+
+#[derive(Debug)]
+struct MultiHeadAttention{
+    head: Vec<Head>,
+    proj:Linear,
+    dropout:f64,
+}
+
+impl MultiHeadAttention{
+    fn new(vs:&nn::Path,num_heads:i32,head_size:i64)->MultiHeadAttention{
+        let mut head = Vec::new();
+        for _ in 0..num_heads{
+            head.push(Head::new(vs,head_size))
+        }
+
+        return MultiHeadAttention { 
+            head, 
+            proj: nn::linear(vs, N_EMBD, N_EMBD,Default::default()),
+            dropout: DROPOUT 
+        };
+    }
+}
+impl Module for MultiHeadAttention{
+    fn forward(&self, x:&Tensor) -> Tensor {
+        let mut out = tch::Tensor::cat(
+            &self.head
+            .iter()
+            .map(|head| head.forward(&x))
+            .collect::<Vec<_>>(),
+            -1,
+            );
+
+        out = self.proj.forward(&out);
+        return out;
+    }
+}
+
+
+// class FeedFoward(nn.Module):
+//     """ a simple linear layer followed by a non-linearity """
+
+//     def __init__(self, n_embd):
+//         super().__init__()
+//         self.net = nn.Sequential(
+//             nn.Linear(n_embd, 4 * n_embd),
+//             nn.ReLU(),
+//             nn.Linear(4 * n_embd, n_embd),
+//             nn.Dropout(dropout),
+//         )
+
+//     def forward(self, x):
+//         return self.net(x)
+
+#[derive(Debug)]
+struct FeedForward{
+    net:nn::Sequential,
+}
+impl FeedForward{
+    fn new(vs:&nn::Path)->FeedForward{
+            let net = nn::seq()
+                .add(nn::linear(vs,N_EMBD, 4 * N_EMBD, Default::default()))
+                .add_fn(|xs|xs.relu())
+                .add(nn::linear(vs,4 * N_EMBD, N_EMBD, Default::default()))
+                .add_fn(|xs|xs.dropout(DROPOUT, true));
+                
+        return FeedForward { net };
+    }
+}
+impl Module for FeedForward{
+    fn forward(&self, xs: &Tensor) -> Tensor {
+        return self.net.forward(xs);
+    }
+}
+
+//     def __init__(self, n_embd, n_head):
+//         # n_embd: embedding dimension, n_head: the number of heads we'd like
+//         super().__init__()
+//         head_size = n_embd // n_head
+//         self.sa = MultiHeadAttention(n_head, head_size)
+//         self.ffwd = FeedFoward(n_embd)
+//         self.ln1 = nn.LayerNorm(n_embd)
+//         self.ln2 = nn.LayerNorm(n_embd)
+
+//     def forward(self, x):
+//         x = x + self.sa(self.ln1(x))
+//         x = x + self.ffwd(self.ln2(x))
+//         return x
+
+#[derive(Debug)]
+struct Block{
+    sa:MultiHeadAttention,
+    ffwd:FeedForward,
+    ln1:nn::LayerNorm,
+    ln2:nn::LayerNorm,
+}
+
+impl Block{
+    fn new(vs:&nn::Path)->Block{
+        let head_size = N_EMBD/N_HEAD;
+        return Block { 
+            sa: MultiHeadAttention::new(vs,N_HEAD as i32, head_size),
+            ffwd: FeedForward::new(&vs),
+            ln1: nn::layer_norm(vs, vec![N_EMBD], Default::default()),
+            ln2: nn::layer_norm(vs, vec![N_EMBD], Default::default())
+        }
+    }
+}
+
+impl Module for Block{
+    fn forward(&self, xs: &Tensor) -> Tensor {
+        let mut x = xs+self.sa.forward(&self.ln1.forward(xs));
+        let temp = self.ffwd.forward(&self.ln2.forward(&x));
+        x = x+temp;
+        return x;
     }
 }
