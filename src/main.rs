@@ -286,6 +286,7 @@ impl Module for Block{
 //         self.ln_f = nn.LayerNorm(n_embd) # final layer norm
 //         self.lm_head = nn.Linear(n_embd, vocab_size)
 
+#[derive(Debug)]
 struct BigramLanguageModel{
     token_embedding_table :nn::Embedding,
     position_embedding_table: nn::Embedding,
@@ -308,7 +309,29 @@ impl  BigramLanguageModel{
             lm_head: nn::linear(vs, N_EMBD, *VOCAB_SIZE, Default::default()) 
         }
     }
+
+    fn forward(&self, idx: &Tensor, targets: Option<&Tensor>) -> (Tensor, Option<Tensor>) {
+        let (B, T) = idx.size2().unwrap();
+        let tok_emb = self.token_embedding_table.forward(idx); // (B,T,C)
+        let pos_emb = self.position_embedding_table.forward(&(Tensor::arange1(T, (Kind::Float, Device::Cpu)))); // (T,C)
+        let x = tok_emb + pos_emb.unsqueeze(0); // (B,T,C)
+        let x = self.blocks.forward(&x); // (B,T,C)
+        let x = self.ln_f.forward(&x); // (B,T,C)
+        let logits = self.lm_head.forward(&x); // (B,T,vocab_size)
+
+        if let Some(targets) = targets {
+            let logits = logits.view(&[B * T, -1]);
+            let targets = targets.view(&[B * T]);
+            let loss = logits.cross_entropy_for_logits(&targets, None, Reduction::Mean);
+            (logits, Some(loss))
+        } else {
+            (logits, None)
+        }
+    }
+
 }
+
+
 
 
 
