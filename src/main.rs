@@ -1,4 +1,6 @@
 #![allow(warnings)]
+use lazy_static::lazy_static;
+use lazy_static::lazy::Lazy;
 use tch::{Kind, nn, Device, Tensor};
 use tch::nn::{Module, OptimizerConfig,ModuleT,Linear};
 use rand::Rng;
@@ -16,12 +18,19 @@ static N_EMBD:i64 = 64;
 static N_HEAD:i64 = 4;
 static N_LAYER:i64 = 4;
 static DROPOUT:f64 = 0.0;
+lazy_static!{
+    static ref VOCAB_SIZE:i64 = return_vocab_size();
+}
 
+fn return_vocab_size()->i64{
+    let text = read_file(&String::from("geng.txt"));
+    let chars = text.chars().collect::<HashSet<char>>().into_iter().collect::<Vec<char>>();
+    return chars.len() as i64;
+    }
 fn main(){
 
     let text = read_file(&String::from("geng.txt"));
     let chars = text.chars().collect::<HashSet<char>>().into_iter().collect::<Vec<char>>();
-    let vocab_size = chars.len();
 
     //for encoding
     // c(char) to i(index)
@@ -263,3 +272,44 @@ impl Module for Block{
         return x;
     }
 }
+
+
+
+// class BigramLanguageModel(nn.Module):
+
+//     def __init__(self):
+//         super().__init__()
+//         # each token directly reads off the logits for the next token from a lookup table
+//         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
+//         self.position_embedding_table = nn.Embedding(block_size, n_embd)
+//         self.blocks = nn.Sequential(*[Block(n_embd, n_head=n_head) for _ in range(n_layer)])
+//         self.ln_f = nn.LayerNorm(n_embd) # final layer norm
+//         self.lm_head = nn.Linear(n_embd, vocab_size)
+
+struct BigramLanguageModel{
+    token_embedding_table :nn::Embedding,
+    position_embedding_table: nn::Embedding,
+    blocks: nn::Sequential,
+    ln_f: nn::LayerNorm,
+    lm_head: nn::Linear,
+}
+
+impl  BigramLanguageModel{
+    fn new(vs:&nn::Path)->BigramLanguageModel{
+        let mut blocks = nn::seq();
+        for _ in 0..N_LAYER{
+            blocks = blocks.add(Block::new(vs));
+        }
+        BigramLanguageModel { 
+            token_embedding_table: nn::embedding(vs, *VOCAB_SIZE, N_EMBD, Default::default()),
+            position_embedding_table: nn::embedding(vs, BLOCK_SIZE, N_EMBD, Default::default()),
+            blocks,
+            ln_f:nn::layer_norm(vs, vec![N_EMBD], Default::default()) ,
+            lm_head: nn::linear(vs, N_EMBD, *VOCAB_SIZE, Default::default()) 
+        }
+    }
+}
+
+
+
+
